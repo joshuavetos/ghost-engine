@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from skimage.transform import resize
 
 from .core import TopologicalGhostEngine
-from run_benchmark import run_benchmark
+from .benchmark import run_benchmark
 
 
 def _load_image(path, resolution):
@@ -79,7 +79,7 @@ def verify_command(args):
 
 
 def benchmark_command(args):
-    run_benchmark(config_path=args.config, out_dir=args.out)
+    run_benchmark(config_path=args.config, out_dir=args.out, max_cases=args.max_cases, sampling=args.sampling)
 
 
 def build_parser():
@@ -105,6 +105,8 @@ def build_parser():
     benchmark = subparsers.add_parser("benchmark")
     benchmark.add_argument("--config")
     benchmark.add_argument("--out", required=True)
+    benchmark.add_argument("--max-cases", type=int, help="Limit synthetic benchmark cases after sampling.")
+    benchmark.add_argument("--sampling", choices=["full", "first", "random", "stratified"], help="Case selection strategy when max_cases is below the full Cartesian grid.")
     benchmark.set_defaults(func=benchmark_command)
     return parser
 

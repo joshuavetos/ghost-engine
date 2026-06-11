@@ -182,3 +182,92 @@ def test_fft_profile_distance_matches_exhaustive_ordered_alignment():
     )
 
     assert engine._profile_distance(candidate, reference) == pytest.approx(exhaustive)
+
+
+def test_baseline_profiles_are_phase_aligned_before_mean_profile():
+    """Ensures asymmetric references are not smeared by raw circular averaging."""
+    engine = TopologicalGhostEngine(resolution=64)
+    reference = np.array([9.0, 1.0, 2.0, 1.0, 3.0, 1.0])
+    profiles = [np.roll(reference, shift) for shift in [0, 1, 2, 3, 4, 5, 0, 2, 4, 1]]
+    iterator = iter(profiles)
+    engine.extract_signature = lambda _image: next(iterator)
+    engine.extract_topology_descriptors = lambda _image: {
+        "hole_count": 0.0,
+        "euler_number": 1.0,
+        "connected_component_count": 1.0,
+        "skeleton_length": 1.0,
+        "distance_mean": 1.0,
+        "distance_std": 0.0,
+        "distance_max": 1.0,
+        "hu_1": 0.0,
+        "hu_2": 0.0,
+        "hu_3": 0.0,
+        "hu_4": 0.0,
+        "hu_5": 0.0,
+        "hu_6": 0.0,
+        "hu_7": 0.0,
+    }
+    engine.extract_object_signatures = lambda _image: [object()]
+
+    engine.fit_baseline([np.zeros((64, 64)) for _ in profiles])
+
+    raw_mean = np.mean(profiles, axis=0)
+    assert np.max(raw_mean) < np.max(reference)
+    assert np.allclose(engine.mean_profile, reference)
+
+
+def test_internal_hole_changes_topology_descriptors():
+    engine = TopologicalGhostEngine(resolution=64)
+    solid = _ellipse_image(brightness=1.0)
+    holed = solid.copy()
+    rr, cc = ellipse(32, 32, 5, 5, shape=holed.shape)
+    holed[rr, cc] = 0.0
+
+    solid_topology = engine.extract_topology_descriptors(solid)
+    holed_topology = engine.extract_topology_descriptors(holed)
+
+    assert solid_topology["hole_count"] == 0.0
+    assert holed_topology["hole_count"] >= 1.0
+    assert solid_topology["euler_number"] != holed_topology["euler_number"]
+
+
+def test_same_outer_boundary_with_internal_hole_is_rejected():
+    engine = TopologicalGhostEngine(resolution=64)
+    baseline = [_ellipse_image(brightness=0.9) for _ in range(10)]
+    engine.fit_baseline(baseline)
+    holed = _ellipse_image(brightness=0.9)
+    rr, cc = ellipse(32, 32, 5, 5, shape=holed.shape)
+    holed[rr, cc] = 0.0
+
+    verdict = engine.verify(holed, sensitivity=1.0)
+
+    assert verdict["is_mutation"] is True
+    assert verdict["topology_distance"] > 0.0
+
+
+def test_multi_object_all_mode_rejects_detached_fragment():
+    engine = TopologicalGhostEngine(resolution=64, object_mode="all")
+    baseline = [_ellipse_image(brightness=0.9) for _ in range(10)]
+    engine.fit_baseline(baseline)
+    fragmented = _ellipse_image(brightness=0.9)
+    rr, cc = ellipse(8, 8, 4, 4, shape=fragmented.shape)
+    fragmented[rr, cc] = 0.9
+
+    verdict = engine.verify(fragmented, sensitivity=10.0)
+
+    assert verdict["object_count_mismatch"] is True
+    assert verdict["is_mutation"] is True
+
+
+def test_model_save_load_round_trip(tmp_path):
+    engine = TopologicalGhostEngine(resolution=64, object_mode="largest")
+    baseline = [_ellipse_image(brightness=0.9) for _ in range(10)]
+    engine.fit_baseline(baseline, metadata={"suite": "unit"})
+    model_path = tmp_path / "model.json"
+
+    engine.save(model_path)
+    loaded = TopologicalGhostEngine.load(model_path)
+
+    assert np.allclose(loaded.mean_profile, engine.mean_profile)
+    assert loaded.variance_cutoff == pytest.approx(engine.variance_cutoff)
+    assert loaded.training_metadata["suite"] == "unit"

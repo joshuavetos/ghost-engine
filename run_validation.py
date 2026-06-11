@@ -54,7 +54,7 @@ def main():
         audit_log[f"sample_{idx}"] = verdict
         
         if verdict["is_mutation"]:
-            print(f" -> [ALERT] Sample {idx}: True Structural Mutation Found. Dist: {verdict['wasserstein_distance']:.4f}")
+            print(f" -> [ALERT] Sample {idx}: True Structural Mutation Found. Dist: {verdict['ordered_profile_distance']:.4f}")
         else:
             print(f" -> Sample {idx}: Stable Geometry.")
 
@@ -62,7 +62,7 @@ def main():
     if not audit_log["sample_3"]["is_mutation"]:
         raise AssertionError(
             f"FAIL-CLOSED (False Negative): The engine failed to isolate the known "
-            f"structural mutation at index 3. Distance: {audit_log['sample_3']['wasserstein_distance']:.4f}"
+            f"structural mutation at index 3. Distance: {audit_log['sample_3']['ordered_profile_distance']:.4f}"
         )
         
     # Assertion Layer 2: Catch False Positives / Miscalibrations

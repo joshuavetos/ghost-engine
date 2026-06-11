@@ -129,3 +129,56 @@ def test_brightness_variance_ignored_but_structural_mutation_detected():
 
     assert stable_verdict["is_mutation"] is False
     assert mutation_verdict["is_mutation"] is True
+
+
+def test_non_rgb_channels_require_explicit_weights():
+    """Ensures arbitrary channel stacks fail closed unless channel semantics are supplied."""
+    engine = TopologicalGhostEngine(resolution=64)
+    hyperspectral_like = np.zeros((64, 64, 5))
+
+    with pytest.raises(ValueError, match="Non-RGB channel-last tensors require explicit channel_weights"):
+        engine.extract_signature(hyperspectral_like)
+
+
+def test_weighted_non_rgb_channels_match_selected_structural_band():
+    """Ensures explicit channel weights are used instead of blind channel averaging."""
+    grayscale = _ellipse_image(brightness=1.0)
+    multiband = np.zeros((64, 64, 5))
+    multiband[:, :, 2] = grayscale
+
+    grayscale_engine = TopologicalGhostEngine(resolution=64)
+    weighted_engine = TopologicalGhostEngine(resolution=64, channel_weights=[0, 0, 1, 0, 0])
+
+    grayscale_profile = grayscale_engine.extract_signature(grayscale)
+    weighted_profile = weighted_engine.extract_signature(multiband)
+
+    assert np.allclose(weighted_profile, grayscale_profile)
+
+
+def test_segmentation_uses_largest_component_to_ignore_small_clutter():
+    """Ensures center estimation is not captured by small bright nuisance objects."""
+    engine = TopologicalGhostEngine(resolution=64)
+    cluttered = _ellipse_image(row=34, col=29, r_radius=13, c_radius=17, brightness=0.85)
+    cluttered[2:5, 54:58] = 1.0
+    cluttered[57:60, 4:7] = 1.0
+
+    _, diagnostics = engine.extract_signature(cluttered, return_diagnostics=True)
+
+    assert diagnostics["center_row"] == pytest.approx(34.0, abs=1.25)
+    assert diagnostics["center_col"] == pytest.approx(29.0, abs=1.25)
+    assert diagnostics["foreground_area"] > 500
+
+
+def test_fft_profile_distance_matches_exhaustive_ordered_alignment():
+    """Ensures optimized circular alignment is numerically equivalent to exhaustive shifts."""
+    engine = TopologicalGhostEngine(resolution=64)
+    reference = np.array([2.0, 1.0, 4.0, 5.0, 3.0, 8.0])
+    candidate = np.array([3.0, 8.0, 2.0, 1.0, 4.0, 5.0])
+
+    exhaustive = min(
+        np.sqrt(np.mean((np.roll(option, shift) - reference) ** 2))
+        for option in (candidate, candidate[::-1])
+        for shift in range(candidate.size)
+    )
+
+    assert engine._profile_distance(candidate, reference) == pytest.approx(exhaustive)
